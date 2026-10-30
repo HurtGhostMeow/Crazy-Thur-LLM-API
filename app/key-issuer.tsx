@@ -54,7 +54,6 @@ export function KeyIssuer({ apiBaseUrl }: KeyIssuerProps) {
         </div>
         <span className="pill">24H</span>
       </div>
-      <p className="card-copy">每周四开放体验。密钥采用 51 字符的 <code>sk-</code> 格式，仅保存在当前页面状态中；刷新、关闭标签页或重新打开后都无法恢复。</p>
       <div className="endpoint-placeholder" aria-label="API 地址">
         <span>API 地址</span>
         <code>{apiBaseUrl}</code>
