@@ -2,6 +2,8 @@ import { KeyIssuer } from "./key-issuer";
 import { SpotlightCard } from "../components/SpotlightCard";
 
 export default function Home() {
+  const apiBaseUrl = process.env.API_BASE_URL ?? "https://your-api-domain.example/v1";
+
   return (
     <main className="shell">
       <section className="hero" aria-labelledby="page-title">
@@ -16,7 +18,7 @@ export default function Home() {
       </section>
 
       <SpotlightCard>
-        <KeyIssuer />
+        <KeyIssuer apiBaseUrl={apiBaseUrl} />
       </SpotlightCard>
 
       <section className="info-grid" aria-label="接口说明">

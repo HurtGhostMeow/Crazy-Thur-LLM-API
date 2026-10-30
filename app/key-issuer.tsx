@@ -4,7 +4,11 @@ import { useState } from "react";
 
 type KeyResponse = { apiKey: string; expiresAt: string };
 
-export function KeyIssuer() {
+type KeyIssuerProps = {
+  apiBaseUrl: string;
+};
+
+export function KeyIssuer({ apiBaseUrl }: KeyIssuerProps) {
   const [apiKey, setApiKey] = useState("");
   const [expiresAt, setExpiresAt] = useState("");
   const [message, setMessage] = useState("");
@@ -51,10 +55,10 @@ export function KeyIssuer() {
         <span className="pill">24H</span>
       </div>
       <p className="card-copy">每周四开放体验。密钥采用 51 字符的 <code>sk-</code> 格式，仅保存在当前页面状态中；刷新、关闭标签页或重新打开后都无法恢复。</p>
-      <div className="endpoint-placeholder" aria-label="API 地址占位信息">
+      <div className="endpoint-placeholder" aria-label="API 地址">
         <span>API 地址</span>
-        <code>https://your-api-domain.example/v1</code>
-        <small>部署后将在此显示实际地址</small>
+        <code>{apiBaseUrl}</code>
+        <small>由项目运行配置提供</small>
       </div>
       <button className="primary-button" type="button" onClick={issueKey} disabled={loading}>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 14a5 5 0 1 1 4.7 3.32L9 20H6v-3l2.11-2.11A5 5 0 0 1 7 14Zm10-5h.01" /></svg>
