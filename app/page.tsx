@@ -14,7 +14,7 @@ export default function Home() {
 
       <section className="warning" aria-label="重要安全提醒">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2.8 20h18.4L12 3Zm0 5.4v5.2m0 3.3h.01" /></svg>
-        <div><strong>仅供演示，不能用于生产环境。</strong><span>请勿用于真实业务、保存到仓库、嵌入客户端或共享给他人。</span></div>
+        <div><strong>这不是 DeepSeek 官方页面，仅供演示，不能用于生产环境。</strong><span>请勿用于真实业务、保存到仓库、嵌入客户端或共享给他人。</span></div>
       </section>
 
       <SpotlightCard>
