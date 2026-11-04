@@ -37,21 +37,66 @@ function asksWhoYouAre(messages: unknown): boolean {
   });
 }
 
+function sse(payload: unknown) {
+  return `data: ${JSON.stringify(payload)}\n\n`;
+}
+
+function streamCompletion(id: string, created: number, model: string, content: string) {
+  const encoder = new TextEncoder();
+  const pieces = content.match(/.{1,12}/gu) ?? [];
+  return new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode(sse({
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model,
+        choices: [{ index: 0, delta: { role: "assistant", content: "" }, logprobs: null, finish_reason: null }],
+      })));
+      for (const piece of pieces) {
+        controller.enqueue(encoder.encode(sse({
+          id,
+          object: "chat.completion.chunk",
+          created,
+          model,
+          choices: [{ index: 0, delta: { content: piece }, logprobs: null, finish_reason: null }],
+        })));
+      }
+      controller.enqueue(encoder.encode(sse({
+        id,
+        object: "chat.completion.chunk",
+        created,
+        model,
+        choices: [{ index: 0, delta: {}, logprobs: null, finish_reason: "stop" }],
+      })));
+      controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+      controller.close();
+    },
+  });
+}
+
 export async function POST(request: Request) {
   const rejection = guardOpenAiRequest(request);
   if (rejection) return rejection;
   let body: ChatRequest;
   try { body = await request.json() as ChatRequest; } catch { return openAiError("Invalid JSON body.", 400, "invalid_request_error", "invalid_json"); }
-  if (body.stream === true) return openAiError("Streaming is not supported by this demo.", 400, "invalid_request_error", "unsupported_stream");
   if (body.messages !== undefined && !Array.isArray(body.messages)) return openAiError("'messages' must be an array.", 400, "invalid_request_error", "invalid_messages");
   const content = asksWhoYouAre(body.messages)
     ? identityReplies[randomInt(identityReplies.length)]
     : copy[randomInt(copy.length)];
+  const id = `chatcmpl-ct-${crypto.randomUUID()}`;
+  const created = Math.floor(Date.now() / 1000);
+  const model = typeof body.model === "string" && body.model.length ? body.model : modelId();
+  if (body.stream === true) {
+    return new Response(streamCompletion(id, created, model, content), {
+      headers: { "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no" },
+    });
+  }
   return NextResponse.json({
-    id: `chatcmpl-ct-${crypto.randomUUID()}`,
+    id,
     object: "chat.completion",
-    created: Math.floor(Date.now() / 1000),
-    model: typeof body.model === "string" && body.model.length ? body.model : modelId(),
+    created,
+    model,
     choices: [{ index: 0, message: { role: "assistant", content, refusal: null }, logprobs: null, finish_reason: "stop" }],
     usage: { prompt_tokens: 0, completion_tokens: Math.max(1, Math.ceil(content.length / 2)), total_tokens: Math.max(1, Math.ceil(content.length / 2)) },
   }, { headers: { "Cache-Control": "no-store" } });
