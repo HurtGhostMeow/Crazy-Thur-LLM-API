@@ -1,4 +1,4 @@
-# DeepSeek V50 Flash 体验 API
+# Crazy-Thur-LLM-API
 
 一个只用于演示的 Next.js OpenAI 兼容接口：每周四按北京时间开放，并随机返回预置的演示内容。
 
