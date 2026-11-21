@@ -2,6 +2,7 @@ import { randomInt } from "node:crypto";
 import { NextResponse } from "next/server";
 import copy from "../../../../data/crazy-thursday-copy.json";
 import { guardOpenAiRequest } from "../../../../lib/api-guard";
+import { fetchExternalChat, parseCompletionPayload, readExternalLlmConfig, rewriteExternalSse, type CompletionUsage } from "../../../../lib/external-llm";
 import { modelId, openAiError } from "../../../../lib/openai";
 
 export const runtime = "nodejs";
@@ -9,6 +10,8 @@ export const dynamic = "force-dynamic";
 
 type ChatMessage = { role?: unknown; content?: unknown };
 type ChatRequest = { model?: unknown; messages?: unknown; stream?: unknown };
+
+let warnedExternalConfigError: string | null = null;
 
 const identityQuestion = /(你\s*(?:是|叫|到底是)\s*(?:谁|什么)|(?:介绍|说说)\s*(?:一下)?\s*(?:你自己|你)|自我介绍|介绍自己|你自己\s*是\s*谁|who\s+are\s+you|what\s+are\s+you)/i;
 const identityReplies = [
@@ -75,29 +78,68 @@ function streamCompletion(id: string, created: number, model: string, content: s
   });
 }
 
+function estimatedUsage(content: string): CompletionUsage {
+  const completionTokens = Math.max(1, Math.ceil(content.length / 2));
+  return { prompt_tokens: 0, completion_tokens: completionTokens, total_tokens: completionTokens };
+}
+
+function jsonCompletion(id: string, created: number, model: string, content: string, usage: CompletionUsage, finishReason = "stop") {
+  return NextResponse.json({
+    id,
+    object: "chat.completion",
+    created,
+    model,
+    choices: [{ index: 0, message: { role: "assistant", content, refusal: null }, logprobs: null, finish_reason: finishReason }],
+    usage,
+  }, { headers: { "Cache-Control": "no-store" } });
+}
+
+function sseResponse(stream: ReadableStream<Uint8Array>) {
+  return new Response(stream, {
+    headers: { "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no" },
+  });
+}
+
 export async function POST(request: Request) {
   const rejection = guardOpenAiRequest(request);
   if (rejection) return rejection;
   let body: ChatRequest;
   try { body = await request.json() as ChatRequest; } catch { return openAiError("Invalid JSON body.", 400, "invalid_request_error", "invalid_json"); }
   if (body.messages !== undefined && !Array.isArray(body.messages)) return openAiError("'messages' must be an array.", 400, "invalid_request_error", "invalid_messages");
-  const content = asksWhoYouAre(body.messages)
-    ? identityReplies[randomInt(identityReplies.length)]
-    : copy[randomInt(copy.length)];
   const id = `chatcmpl-ct-${crypto.randomUUID()}`;
   const created = Math.floor(Date.now() / 1000);
   const model = typeof body.model === "string" && body.model.length ? body.model : modelId();
-  if (body.stream === true) {
-    return new Response(streamCompletion(id, created, model, content), {
-      headers: { "Cache-Control": "no-cache, no-transform", Connection: "keep-alive", "Content-Type": "text/event-stream; charset=utf-8", "X-Accel-Buffering": "no" },
-    });
+
+  const external = readExternalLlmConfig();
+  if (external.error && external.error !== warnedExternalConfigError) {
+    warnedExternalConfigError = external.error;
+    console.warn(`[external-llm] ${external.error} Falling back to local copy.`);
   }
-  return NextResponse.json({
-    id,
-    object: "chat.completion",
-    created,
-    model,
-    choices: [{ index: 0, message: { role: "assistant", content, refusal: null }, logprobs: null, finish_reason: "stop" }],
-    usage: { prompt_tokens: 0, completion_tokens: Math.max(1, Math.ceil(content.length / 2)), total_tokens: Math.max(1, Math.ceil(content.length / 2)) },
-  }, { headers: { "Cache-Control": "no-store" } });
+  if (external.config) {
+    try {
+      const upstream = await fetchExternalChat(external.config, body.messages, body.stream === true, request.signal);
+      if (upstream.ok) {
+        const contentType = upstream.headers.get("content-type")?.toLowerCase() ?? "";
+        if (body.stream === true && contentType.includes("text/event-stream") && upstream.body) {
+          return sseResponse(rewriteExternalSse(upstream.body, model));
+        }
+        const parsed = parseCompletionPayload(await upstream.json());
+        if (parsed) {
+          if (body.stream === true) return sseResponse(streamCompletion(id, created, model, parsed.content));
+          return jsonCompletion(id, created, model, parsed.content, parsed.usage ?? estimatedUsage(parsed.content), parsed.finishReason);
+        }
+      }
+      console.warn(`[external-llm] Upstream returned ${upstream.status}; falling back to local copy.`);
+    } catch {
+      console.warn("[external-llm] Upstream request failed; falling back to local copy.");
+    }
+  }
+
+  const content = asksWhoYouAre(body.messages)
+    ? identityReplies[randomInt(identityReplies.length)]
+    : copy[randomInt(copy.length)];
+  if (body.stream === true) {
+    return sseResponse(streamCompletion(id, created, model, content));
+  }
+  return jsonCompletion(id, created, model, content, estimatedUsage(content));
 }
